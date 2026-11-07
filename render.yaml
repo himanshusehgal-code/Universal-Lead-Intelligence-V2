@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: universal-lead-intelligence
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: lead-model-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: MODEL_DIR
+        value: /opt/render/project/src/data

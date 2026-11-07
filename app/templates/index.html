@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universal Lead Intelligence</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="wrap">
+  <header><div class="eyebrow">ML • LEAD PRIORITIZATION</div><h1>Universal Lead Intelligence</h1>
+  <p>Connect a CSV export from almost any CRM, map five standard fields, train and score leads.</p></header>
+  <section class="panel">
+    <h2>1. Upload historical training data</h2>
+    <p class="muted">CSV should contain historical leads. Include a Converted/Lost outcome column when available.</p>
+    <input id="trainFile" type="file" accept=".csv">
+    <button id="previewBtn" class="secondary">Preview columns</button>
+    <div id="preview" class="small"></div>
+    <div id="mapping" class="mapping hidden">
+      <h3>2. Map your source columns</h3>
+      <p class="muted">Choose the column in your file that matches each standard parameter.</p>
+      <div id="mappingFields" class="grid"></div>
+      <label class="field">Number of clusters
+        <input id="clusters" type="number" min="2" max="12" value="4">
+      </label>
+      <button id="trainBtn">Train model</button>
+    </div>
+    <div id="trainResult" aria-live="polite"></div>
+  </section>
+  <section class="panel">
+    <h2>3. Score new leads</h2>
+    <p class="muted">Upload a CSV with the same mapped columns, or remap if its headers differ.</p>
+    <input id="predictFile" type="file" accept=".csv">
+    <button id="predictBtn">Predict lead priority</button>
+    <div id="predictResult" aria-live="polite"></div>
+  </section>
+  <section class="panel">
+    <h2>Model status</h2><button id="statusBtn" class="secondary">Refresh status</button><pre id="status" class="small">Not loaded yet.</pre>
+  </section>
+  <section class="panel">
+    <h2>Model & Dataset Management</h2>
+    <p class="muted">Original training files are retained for future retraining. Processed features, versioned model artifacts and metadata are stored separately. New prediction results are recorded in local SQLite history.</p>
+    <button id="datasetsBtn" class="secondary">View datasets</button>
+    <button id="modelsBtn" class="secondary">View model versions</button>
+    <button id="predictionsBtn" class="secondary">View recent predictions</button>
+    <div id="registryResult" class="small" aria-live="polite"></div>
+  </section>
+  <footer>Unsupervised clusters discover patterns. A genuine conversion probability requires historical outcome labels and independent validation.</footer>
+</main>
+<script src="/static/app.js"></script>
+</body></html>
