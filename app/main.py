@@ -155,7 +155,7 @@ def find_label_column(df: pd.DataFrame, mapping: dict[str, Any]) -> str | None:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 
 @app.get("/health")

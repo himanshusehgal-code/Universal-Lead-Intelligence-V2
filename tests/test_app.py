@@ -61,6 +61,11 @@ def test_health_check_initial():
     data = response.json()
     assert data["status"] == "ok"
 
+def test_home_page():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Universal Lead Intelligence" in response.text
+
 def test_preview_csv():
     csv_bytes = io.BytesIO(SAMPLE_TRAIN_CSV.encode("utf-8"))
     response = client.post("/api/preview", files={"file": ("train.csv", csv_bytes, "text/csv")})
