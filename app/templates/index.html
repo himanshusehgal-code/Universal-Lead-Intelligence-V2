@@ -5,291 +5,476 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Universal Lead Intelligence V2</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 </head>
 <body>
-<div class="topbar">
-  <div class="topbar-inner">
-    <div class="brand">
-      <div class="logo-badge">V2</div>
-      <div>
-        <div class="brand-title">Universal Lead Intelligence</div>
-        <div class="brand-sub">Multi-Source AI Lead Prioritization & In-Place Scoring</div>
-      </div>
+
+<!-- AUTH SCREEN (Shown when not logged in) -->
+<div id="authScreen" class="auth-wrapper">
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="logo-icon">✨</div>
+      <h1>Universal Lead Intelligence</h1>
+      <p class="muted">Free Local SQLite AI Lead Prioritization Platform</p>
     </div>
-    <div class="topbar-controls">
-      <div class="workspace-pill">
-        <label for="workspaceSelect">🏢 Workspace:</label>
-        <select id="workspaceSelect"></select>
-        <button id="newWsBtn" class="pill-btn" title="Create Workspace">+ New</button>
-      </div>
-      <div class="user-pill" id="userPill">
-        <span id="userDisplayName">👤 analyst@apexmotors.com</span>
-        <button id="loginModalBtn" class="pill-btn">Switch User</button>
-      </div>
+
+    <!-- Auth Tabs -->
+    <div class="auth-tabs">
+      <button id="tabSignInBtn" class="auth-tab active" type="button">Sign In</button>
+      <button id="tabSignUpBtn" class="auth-tab" type="button">Create Account</button>
     </div>
+
+    <!-- Sign In Form -->
+    <form id="signInForm" class="auth-form">
+      <label class="field">Email Address
+        <input id="loginEmailInput" type="email" required placeholder="analyst@apexmotors.com" value="analyst@apexmotors.com">
+      </label>
+      <label class="field">Password
+        <input id="loginPasswordInput" type="password" required placeholder="••••••••" value="password123">
+      </label>
+      <button type="submit" class="btn primary btn-block">Sign In to Workspace</button>
+      <button id="demoLoginBtn" type="button" class="btn ghost btn-block" style="margin-top:10px">⚡ 1-Click Demo Login (Apex Motors)</button>
+    </form>
+
+    <!-- Sign Up Form -->
+    <form id="signUpForm" class="auth-form hidden">
+      <div class="grid-2">
+        <label class="field">Full Name
+          <input id="signupNameInput" type="text" required placeholder="Alex Turner">
+        </label>
+        <label class="field">Work Email
+          <input id="signupEmailInput" type="email" required placeholder="alex@mycompany.com">
+        </label>
+      </div>
+      <div class="grid-2">
+        <label class="field">Company / Workspace Name
+          <input id="signupWorkspaceInput" type="text" required placeholder="Apex Motors Dealership">
+        </label>
+        <label class="field">Industry
+          <select id="signupIndustryInput">
+            <option value="Automotive">Automotive</option>
+            <option value="Manufacturing">Manufacturing & Industrial</option>
+            <option value="Technology">Technology & SaaS</option>
+            <option value="Real Estate">Real Estate</option>
+            <option value="Finance">Finance & Insurance</option>
+            <option value="General">General B2B</option>
+          </select>
+        </label>
+      </div>
+      <label class="field">Password (min 6 characters)
+        <input id="signupPasswordInput" type="password" required minlength="6" placeholder="••••••••">
+      </label>
+      <button type="submit" class="btn primary btn-block">Create Account & Workspace</button>
+    </form>
+    
+    <div id="authNotice" class="small notice hidden" aria-live="polite"></div>
   </div>
 </div>
 
-<main class="wrap">
-  <!-- Navigation Tabs -->
-  <nav class="nav-tabs">
-    <button class="tab-btn active" data-tab="tab-connectors">🔌 Multi-Source Connectors</button>
-    <button class="tab-btn" data-tab="tab-report">📊 In-Place Enriched Report <span id="reportCountBadge" class="tab-badge hidden">0</span></button>
-    <button class="tab-btn" data-tab="tab-train">🧠 Train Workspace Model</button>
-    <button class="tab-btn" data-tab="tab-models">🗄️ Model Registry & SQLite Audit</button>
-  </nav>
-
-  <!-- TAB 1: CONNECTORS & SCORING -->
-  <div id="tab-connectors" class="tab-content active">
-    <section class="panel">
-      <div class="panel-header">
-        <h2>Choose Data Source</h2>
-        <p class="muted">Connect your local SQLite database, public Google Sheet, or CSV to score leads with AI and get an in-place enriched report.</p>
+<!-- MAIN DASHBOARD SCREEN (Shown when logged in) -->
+<div id="mainScreen" class="main-wrapper hidden">
+  <!-- Topbar -->
+  <header class="app-topbar">
+    <div class="topbar-inner">
+      <div class="topbar-left">
+        <div class="brand-badge">
+          <span class="badge-icon">🎯</span>
+          <div>
+            <div class="brand-title">Universal Lead Intelligence <span class="v2-tag">V2</span></div>
+            <div class="brand-sub">Free Local SQLite • In-Place ML Scoring</div>
+          </div>
+        </div>
       </div>
 
-      <div class="connector-tabs">
-        <button class="connector-tab active" data-connector="sqlite">🗄️ Free Local SQLite DB</button>
-        <button class="connector-tab" data-connector="googlesheets">📑 Google Sheets</button>
-        <button class="connector-tab" data-connector="csv">📁 CSV File Upload</button>
-        <button class="connector-tab" data-connector="api">⚡ Direct JSON API</button>
+      <div class="topbar-center">
+        <div class="workspace-selector-box">
+          <span class="ws-label">🏢 Workspace:</span>
+          <select id="activeWorkspaceSelect"></select>
+          <button id="createWsBtn" class="btn-xs" title="Create a new workspace">+ New</button>
+        </div>
       </div>
 
-      <!-- SQLite Connector Panel -->
-      <div id="connector-sqlite" class="connector-pane active">
-        <div class="callout-box">
-          <div class="callout-title"><b>Free Local SQLite Database:</b> <code>data/lead_intelligence.sqlite3</code></div>
-          <p class="small muted">Query any local CRM table directly. Pre-seeded with <b>crm_leads_lake</b> (standard schema) and <b>inbound_pipeline_raw</b> (alternative headers for AI Auto-Mapping).</p>
+      <div class="topbar-right">
+        <button id="openApiModalBtn" class="btn secondary btn-sm">🔑 Cloud & Server API</button>
+        <div class="user-profile-badge">
+          <div class="user-avatar" id="userAvatar">A</div>
+          <div class="user-meta">
+            <div class="user-name" id="userDisplayName">Alex Turner</div>
+            <div class="user-email" id="userDisplayEmail">analyst@apexmotors.com</div>
+          </div>
+          <button id="logoutBtn" class="btn-logout" title="Log out">🚪</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Workspace Hero Banner -->
+  <div class="hero-strip">
+    <div class="hero-inner">
+      <div class="hero-left">
+        <h2 id="workspaceHeading">Apex Motors Dealership Hub</h2>
+        <p class="muted small" id="workspaceDesc">High-volume automotive CRM leads & showroom conversions</p>
+      </div>
+      <div class="hero-right">
+        <div id="modelStatusPill" class="model-status-pill checking">
+          <span class="status-indicator"></span>
+          <span id="modelStatusText">Checking model status…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="content-wrap">
+    <!-- STEP 1: TRAIN MODEL ONCE -->
+    <section class="dash-card step-card" id="stepTrainCard">
+      <div class="card-step-badge">STEP 1</div>
+      <div class="card-header">
+        <div class="card-title-group">
+          <h3>📁 Train Workspace Model (One-Time Setup)</h3>
+          <p class="muted">Upload your historical CRM leads CSV with past outcomes (Converted/Won vs Lost) to train and activate the predictive model.</p>
+        </div>
+        <button id="toggleTrainBtn" class="btn secondary btn-sm">Collapse / Expand</button>
+      </div>
+
+      <div id="trainBody" class="step-body">
+        <div class="upload-dropzone" id="trainDropzone">
+          <div class="dropzone-icon">📄</div>
+          <div class="dropzone-text"><b>Choose a historical CSV file</b> or drag & drop here</div>
+          <div class="small muted">Must contain historical lead columns and ideally an outcome column (Converted / Lost).</div>
+          <input id="trainFileInput" type="file" accept=".csv" class="dropzone-input">
         </div>
 
-        <div class="field-row">
-          <label class="field">Quick Select Table:
-            <select id="sqliteTableSelect">
-              <option value="crm_leads_lake">crm_leads_lake (Standard 50 Rich CRM Leads)</option>
-              <option value="inbound_pipeline_raw">inbound_pipeline_raw (Alternative CRM Headers)</option>
-            </select>
+        <div id="trainPreviewBox" class="preview-box hidden">
+          <div class="preview-header">
+            <div>
+              <span id="trainPreviewRows" class="badge-accent">0 rows</span>
+              <span class="good" style="margin-left:8px;font-size:13px">✨ AI Schema Auto-Detection Active</span>
+            </div>
+            <span id="trainPreviewFilename" class="muted small"></span>
+          </div>
+
+          <div class="mapping-instruction">
+            Choose or confirm the column in your CSV that corresponds to each standard lead parameter:
+          </div>
+          <div id="mappingGrid" class="grid-3"></div>
+
+          <div class="train-controls">
+            <label class="field inline-field">Clusters:
+              <input id="trainClustersInput" type="number" min="2" max="12" value="4" style="width:70px">
+            </label>
+            <button id="executeTrainBtn" class="btn primary">⚡ Train & Activate Workspace Model</button>
+          </div>
+        </div>
+
+        <div id="trainResultBox" class="result-box hidden" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- STEP 2: SCORE NEW LEADS (MULTI-SOURCE) -->
+    <section class="dash-card step-card">
+      <div class="card-step-badge">STEP 2</div>
+      <div class="card-header">
+        <div class="card-title-group">
+          <h3>🎯 Score Next Leads (Multi-Source Connectors)</h3>
+          <p class="muted">Now that your model is ready, score new incoming leads from any data source. Your original table columns will be preserved 100% in-place.</p>
+        </div>
+      </div>
+
+      <!-- Connector Tabs -->
+      <div class="source-nav">
+        <button class="source-btn active" data-source="csv">📁 CSV File Upload</button>
+        <button class="source-btn" data-source="sheets">📑 Live Google Sheets</button>
+        <button class="source-btn" data-source="sqlite">🗄️ Free Local SQLite DB</button>
+        <button class="source-btn" data-source="api">⚡ External Server REST API</button>
+      </div>
+
+      <!-- Connector 1: CSV -->
+      <div id="source-csv" class="source-pane active">
+        <div class="source-body">
+          <p class="small muted">Upload a CSV containing new leads to score with your active workspace model:</p>
+          <input id="scoreCsvInput" type="file" accept=".csv" class="file-picker">
+          <div class="action-row">
+            <button id="scoreCsvBtn" class="btn primary">🚀 Score Leads & Generate In-Place Report</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connector 2: Google Sheets -->
+      <div id="source-sheets" class="source-pane hidden">
+        <div class="source-body">
+          <label class="field">Google Sheet URL:
+            <input id="sheetsUrlInput" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing">
           </label>
+          <div class="small muted" style="margin-top:6px">
+            💡 Make sure the sheet share settings are set to <i>"Anyone with the link can view"</i>.
+            <button id="loadSampleSheetBtn" type="button" class="btn-inline">Use Sample Dealership Sheet</button>
+          </div>
+          <div class="action-row">
+            <button id="scoreSheetsBtn" class="btn primary">🚀 Score Google Sheet Leads & Generate Report</button>
+          </div>
         </div>
-
-        <label class="field">Custom SQL Query:
-          <textarea id="sqliteQuery" rows="3">SELECT * FROM crm_leads_lake LIMIT 50;</textarea>
-        </label>
-
-        <div class="btn-group">
-          <button id="sqlitePreviewBtn" class="secondary">👁️ Preview SQL Data</button>
-          <button id="sqliteScoreBtn" class="primary">⚡ Score Leads & Generate In-Place Report</button>
-        </div>
-        <div id="sqlitePreviewResult" class="small"></div>
       </div>
 
-      <!-- Google Sheets Connector Panel -->
-      <div id="connector-googlesheets" class="connector-pane hidden">
-        <div class="callout-box">
-          <div class="callout-title"><b>Google Sheets Live Connector</b></div>
-          <p class="small muted">Paste any Google Sheet link. The backend automatically extracts the CSV stream, runs AI auto-mapping, and generates an in-place report retaining all your spreadsheet columns.</p>
+      <!-- Connector 3: SQLite Database -->
+      <div id="source-sqlite" class="source-pane hidden">
+        <div class="source-body">
+          <div class="sqlite-info-box">
+            <b>Local SQLite Database:</b> <code>data/lead_intelligence.sqlite3</code>
+            <p class="small muted" style="margin:4px 0 0">Pre-seeded with <b>crm_leads_lake</b> (50 rich customer records) and <b>inbound_pipeline_raw</b> (alternative headers).</p>
+          </div>
+          <div class="grid-2">
+            <label class="field">Quick Select Pre-Seeded Table:
+              <select id="quickSqliteTable">
+                <option value="crm_leads_lake">crm_leads_lake (50 Leads • Contact info, deal size, notes)</option>
+                <option value="inbound_pipeline_raw">inbound_pipeline_raw (Alternative CRM Headers)</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">SQL Query:
+            <textarea id="sqliteQueryInput" rows="3">SELECT * FROM crm_leads_lake LIMIT 50;</textarea>
+          </label>
+          <div class="action-row">
+            <button id="scoreSqliteBtn" class="btn primary">🚀 Execute SQL & Score Leads In-Place</button>
+          </div>
         </div>
-
-        <label class="field">Google Sheet URL:
-          <input id="sheetUrlInput" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
-        </label>
-        <div class="small muted" style="margin-top:4px">
-          💡 Make sure the sheet's Share settings are set to <i>"Anyone with the link can view"</i>.
-          <button id="fillSampleSheetBtn" class="link-btn" type="button">Use Sample Dealership Google Sheet</button>
-        </div>
-
-        <div class="btn-group" style="margin-top:14px">
-          <button id="sheetPreviewBtn" class="secondary">👁️ Preview Sheet Data</button>
-          <button id="sheetScoreBtn" class="primary">⚡ Score Google Sheet Leads</button>
-        </div>
-        <div id="sheetPreviewResult" class="small"></div>
       </div>
 
-      <!-- CSV File Upload Panel -->
-      <div id="connector-csv" class="connector-pane hidden">
-        <div class="callout-box">
-          <div class="callout-title"><b>Standard CSV File Upload</b></div>
-          <p class="small muted">Upload new leads from Salesforce, HubSpot, Zoho, or custom ERP. AI auto-detects column synonyms automatically.</p>
-        </div>
-
-        <input id="predictCsvFile" type="file" accept=".csv">
-        <div class="btn-group">
-          <button id="csvScoreBtn" class="primary">⚡ Score CSV Leads</button>
-        </div>
-        <div id="csvScoreResult" class="small"></div>
-      </div>
-
-      <!-- Direct API Connector Panel -->
-      <div id="connector-api" class="connector-pane hidden">
-        <div class="callout-box">
-          <div class="callout-title"><b>External Server & Database API</b></div>
-          <p class="small muted">Send leads directly from your Node.js, Python, or Go backend to receive the identical table with AI predictions appended.</p>
-        </div>
-        <pre class="code-box"><code>curl -X POST "http://localhost:8000/api/connectors/api/score" \
+      <!-- Connector 4: Server / Cloud API -->
+      <div id="source-api" class="source-pane hidden">
+        <div class="source-body">
+          <p class="small muted">Send raw lead arrays from any server, cloud function, or CRM to receive back the exact table with calculated ML scores:</p>
+          <pre class="code-preview"><code>curl -X POST "http://localhost:8000/api/connectors/api/score" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <span class="user-key-span">YOUR_API_KEY</span>" \
   -d '{
-    "workspace_id": "ws_automotive",
+    "workspace_id": "<span class="user-ws-span">ws_automotive</span>",
     "data": [
       {
-        "lead_id": "LEAD-991",
-        "company_name": "Acme Motors",
+        "lead_id": "LEAD-101",
+        "company_name": "Vertex Dynamics",
+        "contact_person": "Sarah Connor",
         "lead_source": "Website",
         "engagement_level": "High",
         "interest_level": "High",
         "requirement_fit": "High",
         "days_since_interaction": 2,
-        "deal_value": 45000
+        "deal_value_usd": 45000
       }
     ]
   }'</code></pre>
-      </div>
-    </section>
-  </div>
-
-  <!-- TAB 2: IN-PLACE ENRICHED REPORT -->
-  <div id="tab-report" class="tab-content hidden">
-    <section class="panel">
-      <div class="report-header">
-        <div>
-          <h2>In-Place Enriched Lead Report</h2>
-          <p id="reportMeta" class="muted">All original columns from your data source are preserved with calculated ML priority columns appended.</p>
+          <button id="openApiFromSourceBtn" class="btn secondary btn-sm" style="margin-top:10px">View Full API Documentation & SDK Snippets</button>
         </div>
-        <div class="btn-group">
-          <button id="exportCsvBtn" class="secondary">📥 Export Enriched CSV</button>
+      </div>
+
+      <div id="scoringNotice" class="small notice hidden" aria-live="polite"></div>
+    </section>
+
+    <!-- STEP 3: IN-PLACE ENRICHED REPORT -->
+    <section class="dash-card" id="reportSection">
+      <div class="card-step-badge accent-badge">REPORT</div>
+      <div class="card-header report-header">
+        <div>
+          <h3>📊 In-Place Enriched Lead Intelligence Report</h3>
+          <p class="muted small" id="reportMetaInfo">Scored leads will appear here with 100% of your original source columns preserved.</p>
+        </div>
+        <div class="header-actions">
+          <button id="downloadCsvBtn" class="btn primary btn-sm" disabled>📥 Download Enriched CSV</button>
         </div>
       </div>
 
       <!-- KPI Summary Cards -->
-      <div class="kpi-grid">
-        <div class="kpi-card">
+      <div class="kpi-banner">
+        <div class="kpi-box">
           <div class="kpi-label">Total Leads Scored</div>
-          <div id="kpiTotal" class="kpi-val">0</div>
+          <div id="kpiTotalVal" class="kpi-num">0</div>
         </div>
-        <div class="kpi-card p1-card">
+        <div class="kpi-box p1-box">
           <div class="kpi-label">🟢 P1 - High Priority</div>
-          <div id="kpiP1" class="kpi-val good">0</div>
-          <div class="kpi-sub">Contact first</div>
+          <div id="kpiP1Val" class="kpi-num good">0</div>
+          <div class="kpi-caption">Contact first</div>
         </div>
-        <div class="kpi-card p2-card">
+        <div class="kpi-box p2-box">
           <div class="kpi-label">🟡 P2 - Medium Priority</div>
-          <div id="kpiP2" class="kpi-val amber">0</div>
-          <div class="kpi-sub">Follow up</div>
+          <div id="kpiP2Val" class="kpi-num amber">0</div>
+          <div class="kpi-caption">Follow up</div>
         </div>
-        <div class="kpi-card p3-card">
+        <div class="kpi-box p3-box">
           <div class="kpi-label">⚪ P3 - Low Priority</div>
-          <div id="kpiP3" class="kpi-val muted">0</div>
-          <div class="kpi-sub">Nurture</div>
+          <div id="kpiP3Val" class="kpi-num muted">0</div>
+          <div class="kpi-caption">Nurture</div>
         </div>
-        <div class="kpi-card">
+        <div class="kpi-box">
           <div class="kpi-label">🎯 Avg Conversion Prob</div>
-          <div id="kpiAvgProb" class="kpi-val purple">0.0%</div>
+          <div id="kpiAvgVal" class="kpi-num purple">0.0%</div>
         </div>
       </div>
 
-      <!-- Quick Filter -->
-      <div class="filter-bar">
-        <span class="muted" style="font-size:12px;font-weight:700">Filter View:</span>
-        <button class="filter-pill active" data-filter="all">All Leads</button>
-        <button class="filter-pill" data-filter="P1">P1 Leads Only</button>
-        <button class="filter-pill" data-filter="P2">P2 Leads Only</button>
-        <button class="filter-pill" data-filter="P3">P3 Leads Only</button>
+      <!-- Priority Filter Pills -->
+      <div class="filter-strip">
+        <span class="filter-title">Filter by Priority:</span>
+        <button class="filter-btn active" data-prio="all">All Leads</button>
+        <button class="filter-btn" data-prio="P1">P1 Leads Only</button>
+        <button class="filter-btn" data-prio="P2">P2 Leads Only</button>
+        <button class="filter-btn" data-prio="P3">P3 Leads Only</button>
       </div>
 
-      <div id="reportContainer" class="table-scroll-container">
-        <div class="notice">No leads scored yet. Choose a connector from Tab 1 and click <b>Score Leads</b>.</div>
+      <!-- Enriched In-Place Table -->
+      <div id="reportTableWrap" class="table-container">
+        <div class="empty-state">
+          <div class="empty-icon">📊</div>
+          <b>No leads scored yet.</b>
+          <p class="small muted">Score leads from CSV, Google Sheets, or SQLite in Step 2 to generate your report.</p>
+        </div>
       </div>
     </section>
-  </div>
+  </main>
+</div>
 
-  <!-- TAB 3: TRAIN WORKSPACE MODEL -->
-  <div id="tab-train" class="tab-content hidden">
-    <section class="panel">
-      <h2>Train Workspace Model</h2>
-      <p class="muted">Upload historical lead conversions to train an industry-specific model for the active workspace.</p>
-      
-      <input id="trainFile" type="file" accept=".csv">
-      <button id="previewTrainBtn" class="secondary">Preview & Auto-Map Columns</button>
-      <div id="trainPreview" class="small"></div>
-
-      <div id="trainMappingSection" class="mapping hidden">
-        <h3>Verify Column Mapping</h3>
-        <p class="muted">AI has auto-detected your schema. Adjust any column if needed.</p>
-        <div id="mappingFields" class="grid"></div>
-        <label class="field">Number of Unsupervised Clusters:
-          <input id="clusters" type="number" min="2" max="12" value="4">
-        </label>
-        <button id="startTrainBtn" class="primary">Train & Save Model for Workspace</button>
+<!-- API INTEGRATION MODAL -->
+<div id="apiModal" class="modal-overlay hidden">
+  <div class="modal-card wide-modal">
+    <div class="modal-header">
+      <div>
+        <h3>⚡ Cloud Server & External CRM API Integration</h3>
+        <p class="muted small">Connect your external backend, PostgreSQL/MySQL database, or cloud functions directly to Universal Lead Intelligence.</p>
       </div>
-      <div id="trainResult" class="small" aria-live="polite"></div>
-    </section>
-  </div>
+      <button id="closeApiModalBtn" class="close-btn">&times;</button>
+    </div>
 
-  <!-- TAB 4: MODEL REGISTRY & AUDIT -->
-  <div id="tab-models" class="tab-content hidden">
-    <section class="panel">
-      <h2>Active Model Status</h2>
-      <button id="refreshModelStatusBtn" class="secondary">Refresh Model Info</button>
-      <pre id="activeModelStatus" class="small">Loading model info…</pre>
-    </section>
-
-    <section class="panel">
-      <h2>SQLite Audit & Version History</h2>
-      <p class="muted">All models, datasets, and scored leads are audited inside <code>data/lead_intelligence.sqlite3</code>.</p>
-      <div class="btn-group">
-        <button id="viewModelsBtn" class="secondary">Model Versions</button>
-        <button id="viewDatasetsBtn" class="secondary">Historical Datasets</button>
-        <button id="viewScoredAuditBtn" class="secondary">Scored Leads Audit</button>
+    <div class="api-key-banner">
+      <div>
+        <div class="small muted">YOUR PERSONAL API KEY:</div>
+        <code id="userApiKeyDisplay" class="api-key-code">uli_live_loading...</code>
       </div>
-      <div id="registryDisplay" class="small" aria-live="polite"></div>
-    </section>
-  </div>
+      <button id="copyApiKeyBtn" class="btn secondary btn-sm">📋 Copy Key</button>
+    </div>
 
-  <footer>
-    <b>Universal Lead Intelligence V2</b> • Self-contained local AI platform • Free SQLite Engine • Retains 100% of user table columns
-  </footer>
-</main>
+    <!-- Code Snippet Tabs -->
+    <div class="code-tabs">
+      <button class="code-tab active" data-lang="curl">cURL</button>
+      <button class="code-tab" data-lang="python">Python (Requests)</button>
+      <button class="code-tab" data-lang="node">Node.js (Fetch / Axios)</button>
+    </div>
 
-<!-- LOGIN / USER MODAL -->
-<div id="userModal" class="modal-backdrop hidden">
-  <div class="modal-box">
-    <h3>Simulated User Login & Profile</h3>
-    <p class="muted small">Enter an email to associate scoring history, connectors, and trained models with your user profile.</p>
-    <label class="field">Your Email:
-      <input id="loginEmail" type="email" value="analyst@apexmotors.com" placeholder="e.g. yourname@company.com">
-    </label>
-    <label class="field">Your Full Name:
-      <input id="loginName" type="text" value="Alex Turner" placeholder="e.g. Alex Turner">
-    </label>
-    <div class="btn-group" style="margin-top:14px">
-      <button id="saveUserBtn" class="primary">Log In / Switch</button>
-      <button id="closeModalBtn" class="secondary">Cancel</button>
+    <div id="snippet-curl" class="snippet-pane active">
+      <pre class="code-box"><code>curl -X POST "http://localhost:8000/api/connectors/api/score" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <span class="user-key-span">...</span>" \
+  -d '{
+    "workspace_id": "<span class="user-ws-span">...</span>",
+    "data": [
+      {
+        "lead_id": "LEAD-101",
+        "company_name": "Vertex Dynamics",
+        "contact_person": "Sarah Connor",
+        "email": "sarah@vertex.io",
+        "lead_source": "Website",
+        "engagement_level": "High",
+        "interest_level": "High",
+        "requirement_fit": "High",
+        "days_since_interaction": 2,
+        "deal_value_usd": 45000
+      }
+    ]
+  }'</code></pre>
+    </div>
+
+    <div id="snippet-python" class="snippet-pane hidden">
+      <pre class="code-box"><code>import requests
+
+url = "http://localhost:8000/api/connectors/api/score"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer <span class="user-key-span">...</span>"
+}
+payload = {
+    "workspace_id": "<span class="user-ws-span">...</span>",
+    "data": [
+        {
+            "lead_id": "LEAD-101",
+            "company_name": "Vertex Dynamics",
+            "contact_person": "Sarah Connor",
+            "lead_source": "Website",
+            "engagement_level": "High",
+            "interest_level": "High",
+            "requirement_fit": "High",
+            "days_since_interaction": 2,
+            "deal_value_usd": 45000
+        }
+    ]
+}
+
+response = requests.post(url, json=payload, headers=headers)
+enriched_leads = response.json()["results"]
+for lead in enriched_leads:
+    print(f"{lead['company_name']} -> Prob: {lead['conversion_probability_pct']}, Priority: {lead['priority']}")</code></pre>
+    </div>
+
+    <div id="snippet-node" class="snippet-pane hidden">
+      <pre class="code-box"><code>const leads = [
+  {
+    lead_id: "LEAD-101",
+    company_name: "Vertex Dynamics",
+    lead_source: "Website",
+    engagement_level: "High",
+    interest_level: "High",
+    requirement_fit: "High",
+    days_since_interaction: 2,
+    deal_value_usd: 45000
+  }
+];
+
+const res = await fetch("http://localhost:8000/api/connectors/api/score", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer <span class="user-key-span">...</span>"
+  },
+  body: JSON.stringify({
+    workspace_id: "<span class="user-ws-span">...</span>",
+    data: leads
+  })
+});
+
+const data = await res.json();
+console.log("Enriched Leads:", data.results);</code></pre>
     </div>
   </div>
 </div>
 
 <!-- NEW WORKSPACE MODAL -->
-<div id="wsModal" class="modal-backdrop hidden">
-  <div class="modal-box">
-    <h3>Create New Workspace</h3>
-    <p class="muted small">Each workspace has its own industry focus, models, and scoring history.</p>
-    <label class="field">Workspace Name:
-      <input id="wsNameInput" type="text" placeholder="e.g. BlueStar Solar CRM">
-    </label>
-    <label class="field">Industry:
-      <select id="wsIndustryInput">
-        <option value="Automotive">Automotive</option>
-        <option value="Manufacturing">Manufacturing & Industrial</option>
-        <option value="Technology">Technology & SaaS</option>
-        <option value="Real Estate">Real Estate</option>
-        <option value="Finance">Finance & Insurance</option>
-        <option value="General">General B2B</option>
-      </select>
-    </label>
-    <label class="field">Description:
-      <input id="wsDescInput" type="text" placeholder="e.g. Residential and commercial solar installation leads">
-    </label>
-    <div class="btn-group" style="margin-top:14px">
-      <button id="saveWsBtn" class="primary">Create Workspace</button>
-      <button id="closeWsModalBtn" class="secondary">Cancel</button>
+<div id="newWsModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <h3>Create New Workspace</h3>
+        <p class="muted small">Configure an industry-specific workspace for lead scoring.</p>
+      </div>
+      <button id="closeWsModalBtn" class="close-btn">&times;</button>
     </div>
+    <form id="newWsForm">
+      <label class="field">Workspace Name
+        <input id="newWsName" type="text" required placeholder="e.g. BlueStar Industrial Hydraulics">
+      </label>
+      <label class="field">Industry
+        <select id="newWsIndustry">
+          <option value="Automotive">Automotive</option>
+          <option value="Manufacturing">Manufacturing & Industrial</option>
+          <option value="Technology">Technology & SaaS</option>
+          <option value="Real Estate">Real Estate</option>
+          <option value="Finance">Finance & Insurance</option>
+          <option value="General">General B2B</option>
+        </select>
+      </label>
+      <label class="field">Description
+        <input id="newWsDesc" type="text" placeholder="e.g. Hydraulic components & wholesale valve orders">
+      </label>
+      <div class="action-row" style="margin-top:16px">
+        <button type="submit" class="btn primary">Create Workspace</button>
+      </div>
+    </form>
   </div>
 </div>
 

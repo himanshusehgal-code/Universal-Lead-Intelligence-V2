@@ -1,15 +1,18 @@
 """
 Universal Lead Intelligence - SQLite Database & Workspace Manager
 Handles:
+- User Authentication (Sign Up, Login, Password Hashing with Salt)
 - Multi-tenant Workspaces
-- Simulated User Login & Email Association
+- Unique API Keys for External CRM & Cloud Integrations
 - Stored Connectors (SQLite, Google Sheets, CSV, API)
 - Pre-seeded Realistic CRM Lead Tables for Instant Testing
 - Enriched Lead Audit & History
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -41,8 +44,27 @@ def get_connection(db_file: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
+    """Secure zero-dependency SHA-256 with 16-byte random salt."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    pwd_hash = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return pwd_hash, salt
+
+
+def verify_password(password: str, pwd_hash: str, salt: str) -> bool:
+    """Verifies plaintext password against salted SHA-256 hash in constant time."""
+    expected_hash, _ = hash_password(password, salt)
+    return secrets.compare_digest(expected_hash, pwd_hash)
+
+
+def generate_api_key() -> str:
+    """Generate a high-entropy API key for external cloud and server integrations."""
+    return f"uli_live_{secrets.token_hex(20)}"
+
+
 def init_database(db_file: Path | None = None) -> None:
-    """Initialize SQLite schema and pre-seed default workspaces & CRM tables."""
+    """Initialize SQLite schema, run non-destructive migrations, and pre-seed demo data."""
     conn = get_connection(db_file)
     cur = conn.cursor()
 
@@ -58,17 +80,29 @@ def init_database(db_file: Path | None = None) -> None:
     )
     """)
 
-    # 2. Users (Email-based simulation)
+    # 2. Users (Sign-up, Login & Password auth)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL DEFAULT '',
+        salt TEXT NOT NULL DEFAULT '',
         name TEXT NOT NULL,
         workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+        api_key TEXT UNIQUE,
         last_login_at TEXT NOT NULL,
         created_at TEXT NOT NULL
     )
     """)
+
+    # Non-destructive migrations if users table was created previously without auth fields
+    user_cols = [c["name"] for c in cur.execute("PRAGMA table_info(users)").fetchall()]
+    if "password_hash" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+    if "salt" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN salt TEXT NOT NULL DEFAULT ''")
+    if "api_key" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN api_key TEXT")
 
     # 3. Data Sources / Saved Connectors
     cur.execute("""
@@ -148,22 +182,26 @@ def init_database(db_file: Path | None = None) -> None:
         INSERT INTO workspaces (id, name, description, industry, active_model_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """, [
-            ("ws_automotive", "Apex Motors Dealership", "High-volume automotive CRM leads & test-drive conversions", "Automotive", None, now),
+            ("ws_automotive", "Apex Motors Dealership", "High-volume automotive CRM leads & showroom walk-ins", "Automotive", None, now),
             ("ws_industrial", "HoseExperts Industrial B2B", "Industrial manufacturing, hydraulic parts & wholesale orders", "Manufacturing", None, now),
             ("ws_saas", "CloudFlow Enterprise SaaS", "B2B software trials, inbound demos and enterprise expansions", "Technology", None, now),
         ])
 
-    # Pre-seed default users if none exist
+    # Pre-seed default users with credentials if none exist
     cur.execute("SELECT COUNT(*) as cnt FROM users")
     if cur.fetchone()["cnt"] == 0:
         now = datetime.now(timezone.utc).isoformat()
+        default_pwd = "password123"
+        h1, s1 = hash_password(default_pwd)
+        h2, s2 = hash_password(default_pwd)
+        h3, s3 = hash_password(default_pwd)
         cur.executemany("""
-        INSERT INTO users (email, name, workspace_id, last_login_at, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO users (email, password_hash, salt, name, workspace_id, api_key, last_login_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, [
-            ("analyst@apexmotors.com", "Alex Turner (Lead Analyst)", "ws_automotive", now, now),
-            ("sales@hoseexperts.com", "Marcus Vance (Sales Director)", "ws_industrial", now, now),
-            ("growth@cloudflow.io", "Elena Rostova (Growth VP)", "ws_saas", now, now),
+            ("analyst@apexmotors.com", h1, s1, "Alex Turner (Lead Analyst)", "ws_automotive", "uli_live_apex_motors_demo_key_881", now, now),
+            ("sales@hoseexperts.com", h2, s2, "Marcus Vance (Sales Director)", "ws_industrial", "uli_live_hose_experts_demo_key_882", now, now),
+            ("growth@cloudflow.io", h3, s3, "Elena Rostova (Growth VP)", "ws_saas", "uli_live_cloudflow_demo_key_883", now, now),
         ])
 
     # Pre-seed crm_leads_lake if empty
@@ -277,8 +315,102 @@ def update_workspace_model(workspace_id: str, model_id: str, db_file: Path | Non
         conn.close()
 
 
+def register_user(
+    email: str,
+    password: str,
+    name: str = "",
+    workspace_name: str = "",
+    industry: str = "General",
+    db_file: Path | None = None
+) -> dict[str, Any]:
+    """Register a new user with password hashing and workspace creation."""
+    clean_email = email.strip().lower()
+    if not clean_email or "@" not in clean_email:
+        raise ValueError("Please provide a valid email address.")
+    if len(password) < 6:
+        raise ValueError("Password must be at least 6 characters.")
+
+    conn = get_connection(db_file)
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        existing = conn.execute("SELECT id FROM users WHERE email = ?", (clean_email,)).fetchone()
+        if existing:
+            raise ValueError("An account with this email already exists. Please log in.")
+
+        # Determine workspace: create new one if requested, else default
+        if workspace_name.strip():
+            ws = create_workspace(name=workspace_name.strip(), industry=industry, db_file=db_file)
+            target_ws_id = ws["id"]
+        else:
+            ws_row = conn.execute("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1").fetchone()
+            target_ws_id = ws_row["id"] if ws_row else "ws_default"
+
+        pwd_hash, salt = hash_password(password)
+        api_key = generate_api_key()
+        display_name = name.strip() or clean_email.split("@")[0].title()
+
+        conn.execute("""
+        INSERT INTO users (email, password_hash, salt, name, workspace_id, api_key, last_login_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (clean_email, pwd_hash, salt, display_name, target_ws_id, api_key, now, now))
+        conn.commit()
+
+        ws_info = get_workspace(target_ws_id, db_file=db_file)
+        return {
+            "email": clean_email,
+            "name": display_name,
+            "workspace_id": target_ws_id,
+            "workspace_name": ws_info["name"] if ws_info else "Default Workspace",
+            "api_key": api_key,
+            "last_login_at": now,
+            "created_at": now
+        }
+    finally:
+        conn.close()
+
+
+def login_user(
+    email: str,
+    password: str,
+    db_file: Path | None = None
+) -> dict[str, Any]:
+    """Authenticate email and password against stored salt and hash."""
+    clean_email = email.strip().lower()
+    conn = get_connection(db_file)
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (clean_email,)).fetchone()
+        if not row:
+            raise ValueError("No account found with this email. Please sign up.")
+
+        # If user has password set, verify it
+        if row["password_hash"] and row["salt"]:
+            if not verify_password(password, row["password_hash"], row["salt"]):
+                raise ValueError("Incorrect password. Please try again.")
+
+        api_key = row["api_key"]
+        if not api_key:
+            api_key = generate_api_key()
+            conn.execute("UPDATE users SET api_key = ? WHERE id = ?", (api_key, row["id"]))
+
+        conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now, row["id"]))
+        conn.commit()
+
+        ws_info = get_workspace(row["workspace_id"], db_file=db_file)
+        return {
+            "email": row["email"],
+            "name": row["name"],
+            "workspace_id": row["workspace_id"],
+            "workspace_name": ws_info["name"] if ws_info else "Default Workspace",
+            "api_key": api_key,
+            "last_login_at": now
+        }
+    finally:
+        conn.close()
+
+
 def authenticate_user(email: str, name: str = "", workspace_id: str | None = None, db_file: Path | None = None) -> dict[str, Any]:
-    """Login or register user email and set active workspace."""
+    """Backward-compatible quick switch / login for tests and simulation."""
     clean_email = email.strip().lower()
     conn = get_connection(db_file)
     now = datetime.now(timezone.utc).isoformat()
@@ -291,23 +423,27 @@ def authenticate_user(email: str, name: str = "", workspace_id: str | None = Non
             u = dict(row)
             u["workspace_id"] = target_ws
             u["last_login_at"] = now
+            if not u.get("api_key"):
+                u["api_key"] = generate_api_key()
             return u
         else:
-            # Register new user
             first_ws = workspace_id
             if not first_ws:
                 ws_row = conn.execute("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1").fetchone()
                 first_ws = ws_row["id"] if ws_row else "ws_default"
             display_name = name or clean_email.split("@")[0].title()
+            pwd_hash, salt = hash_password("password123")
+            api_key = generate_api_key()
             conn.execute("""
-            INSERT INTO users (email, name, workspace_id, last_login_at, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """, (clean_email, display_name, first_ws, now, now))
+            INSERT INTO users (email, password_hash, salt, name, workspace_id, api_key, last_login_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (clean_email, pwd_hash, salt, display_name, first_ws, api_key, now, now))
             conn.commit()
             return {
                 "email": clean_email,
                 "name": display_name,
                 "workspace_id": first_ws,
+                "api_key": api_key,
                 "last_login_at": now,
                 "created_at": now
             }
@@ -318,7 +454,6 @@ def authenticate_user(email: str, name: str = "", workspace_id: str | None = Non
 def execute_sqlite_query(query: str, db_file: Path | None = None, max_rows: int = 1000) -> list[dict[str, Any]]:
     """Execute a read-only query on the local SQLite database."""
     clean_q = query.strip()
-    # Simple security guard: only allow SELECT queries
     if not clean_q.upper().startswith("SELECT"):
         raise ValueError("Only SELECT queries are allowed for data retrieval.")
     conn = get_connection(db_file)

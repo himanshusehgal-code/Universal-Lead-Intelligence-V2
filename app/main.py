@@ -35,6 +35,8 @@ from app.database import (
     get_workspace,
     create_workspace,
     update_workspace_model,
+    register_user,
+    login_user,
     authenticate_user,
     get_sqlite_tables,
     execute_sqlite_query,
@@ -206,8 +208,17 @@ def health():
 # WORKSPACE & AUTHENTICATION ENDPOINTS
 # -------------------------------------------------------------
 
+class SignUpRequest(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+    workspace_name: str = ""
+    industry: str = "General"
+
+
 class LoginRequest(BaseModel):
     email: str
+    password: str = ""
     name: str = ""
     workspace_id: str | None = None
 
@@ -236,7 +247,6 @@ def activate_workspace(workspace_id: str):
     ws = get_workspace(workspace_id)
     if not ws:
         raise HTTPException(404, "Workspace not found.")
-    # If workspace has an assigned model, activate it
     active_model = ws.get("active_model_id")
     if active_model:
         meta_file = METADATA_DIR / f"{active_model}.json"
@@ -248,12 +258,35 @@ def activate_workspace(workspace_id: str):
     return {"message": f"Workspace '{ws['name']}' activated.", "workspace": ws}
 
 
+@app.post("/api/auth/signup")
+def signup_endpoint(req: SignUpRequest):
+    try:
+        user = register_user(
+            email=req.email,
+            password=req.password,
+            name=req.name,
+            workspace_name=req.workspace_name,
+            industry=req.industry
+        )
+        return {"message": "Account created successfully.", "user": user}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @app.post("/api/auth/login")
-def login_simulation(req: LoginRequest):
+def login_endpoint(req: LoginRequest):
     if not req.email.strip() or "@" not in req.email:
         raise HTTPException(400, "Please provide a valid email address.")
-    user = authenticate_user(email=req.email, name=req.name, workspace_id=req.workspace_id)
-    return {"message": f"Welcome back, {user['name']}.", "user": user}
+    if req.password:
+        try:
+            user = login_user(email=req.email, password=req.password)
+            return {"message": f"Welcome back, {user['name']}.", "user": user}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+    else:
+        # Backward-compatible login simulation for tests
+        user = authenticate_user(email=req.email, name=req.name, workspace_id=req.workspace_id)
+        return {"message": f"Welcome back, {user['name']}.", "user": user}
 
 
 # -------------------------------------------------------------

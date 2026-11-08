@@ -47,6 +47,45 @@ def test_simulated_user_login():
     assert data["user"]["workspace_id"] == "ws_automotive"
 
 
+def test_user_signup_and_password_auth():
+    signup_payload = {
+        "email": "sarah.connor@skyline.org",
+        "password": "SecurePassword123!",
+        "name": "Sarah Connor",
+        "workspace_name": "Skyline Defense Systems",
+        "industry": "Technology"
+    }
+    # 1. Sign up
+    resp = client.post("/api/auth/signup", json=signup_payload)
+    assert resp.status_code == 200
+    user = resp.json()["user"]
+    assert user["email"] == "sarah.connor@skyline.org"
+    assert user["name"] == "Sarah Connor"
+    assert user["workspace_name"] == "Skyline Defense Systems"
+    assert "api_key" in user
+    assert user["api_key"].startswith("uli_live_")
+
+    # 2. Duplicate sign up should fail with 400
+    dup_resp = client.post("/api/auth/signup", json=signup_payload)
+    assert dup_resp.status_code == 400
+
+    # 3. Login with correct password
+    login_resp = client.post("/api/auth/login", json={
+        "email": "sarah.connor@skyline.org",
+        "password": "SecurePassword123!"
+    })
+    assert login_resp.status_code == 200
+    login_data = login_resp.json()
+    assert login_data["user"]["email"] == "sarah.connor@skyline.org"
+
+    # 4. Login with incorrect password should fail with 400
+    bad_resp = client.post("/api/auth/login", json={
+        "email": "sarah.connor@skyline.org",
+        "password": "WrongPassword!"
+    })
+    assert bad_resp.status_code == 400
+
+
 def test_sqlite_connector_tables_and_scoring():
     # 1. List SQLite tables
     tbl_resp = client.get("/api/connectors/sqlite/tables")
