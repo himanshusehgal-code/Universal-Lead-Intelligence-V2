@@ -29,6 +29,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.inspection import permutation_importance
 
+from app.ai_mapper import auto_detect_mapping
+
 APP_DIR = Path(__file__).resolve().parent
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "data"))
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,28 +106,42 @@ def parse_mapping(mapping_text: str) -> dict[str, str | None]:
 
 
 def normalize_features(df: pd.DataFrame, mapping: dict[str, Any], require_all: bool = True) -> pd.DataFrame:
-    missing = [f for f in FEATURES if not mapping.get(f)]
+    # 1. Check which features are missing from mapping or missing from df.columns
+    missing_from_df = [f for f in FEATURES if mapping.get(f) and mapping.get(f) not in df.columns]
+    unmapped = [f for f in FEATURES if not mapping.get(f)]
+
+    # 2. Trigger AI Auto-Detection if any columns are missing or unmapped
+    if missing_from_df or (unmapped and not require_all):
+        samples = df.head(3).replace({np.nan: None}).to_dict(orient="records")
+        ai_res = auto_detect_mapping([str(c) for c in df.columns], samples)
+        ai_map = ai_res.get("mapping", {})
+
+        for f in FEATURES:
+            if f in missing_from_df or not mapping.get(f):
+                if ai_map.get(f) and ai_map.get(f) in df.columns:
+                    mapping[f] = ai_map[f]
+
+    missing = [f for f in FEATURES if not mapping.get(f) or mapping.get(f) not in df.columns]
     if require_all and missing:
         raise HTTPException(400, "Map all five parameters before training: " + ", ".join(missing))
+
     result = pd.DataFrame(index=df.index)
     for feature in FEATURES:
         source = mapping.get(feature)
-        if not source:
+        if not source or source not in df.columns:
             result[feature] = np.nan if feature == "days_since_interaction" else "Unknown"
             continue
-        if source not in df.columns:
-            raise HTTPException(400, f"Mapped column '{source}' does not exist in the CSV.")
+
         series = df[source]
         if feature == "days_since_interaction":
-            # Accept numeric day counts or date-like values. Date-like values are interpreted
-            # relative to today's date; use a numeric days column for reproducible training.
             numeric = pd.to_numeric(series, errors="coerce")
             if numeric.notna().sum() == 0:
                 dates = pd.to_datetime(series, errors="coerce", dayfirst=True)
                 numeric = (pd.Timestamp.utcnow().tz_localize(None).normalize() - dates.dt.tz_localize(None).dt.normalize()).dt.days
-            result[feature] = numeric.clip(lower=0)
+            result[feature] = numeric.fillna(numeric.median() if numeric.notna().any() else 0).clip(lower=0)
         else:
             result[feature] = series.astype("string").fillna("Unknown").str.strip().replace("", "Unknown").astype(str)
+
     return result[FEATURES]
 
 
@@ -168,12 +184,25 @@ async def preview(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(400, "Please upload a CSV file.")
     df = read_csv_upload(await file.read())
+    samples = df.head(5).replace({np.nan: None}).to_dict(orient="records")
+    ai_res = auto_detect_mapping([str(c) for c in df.columns], samples)
     return {
         "filename": file.filename,
         "rows": int(len(df)),
         "columns": [str(c) for c in df.columns],
-        "sample": df.head(5).replace({np.nan: None}).to_dict(orient="records"),
+        "sample": samples,
+        "auto_mapping": ai_res.get("mapping", {}),
+        "mapping_provider": ai_res.get("provider", "semantic_nlp"),
     }
+
+
+@app.post("/api/auto-map")
+async def auto_map(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(400, "Please upload a CSV file.")
+    df = read_csv_upload(await file.read())
+    samples = df.head(5).replace({np.nan: None}).to_dict(orient="records")
+    return auto_detect_mapping([str(c) for c in df.columns], samples)
 
 
 @app.post("/api/train")
@@ -325,13 +354,17 @@ async def predict(file: UploadFile = File(...), mapping: str | None = Form(None)
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(400, "Please upload a CSV file.")
     df = read_csv_upload(await file.read())
-    supplied = parse_mapping(mapping) if mapping else bundle["mapping"]
-    X = normalize_features(df, supplied)
+    supplied = parse_mapping(mapping) if mapping else dict(bundle.get("mapping", {}))
+    X = normalize_features(df, supplied, require_all=False)
     transformed = bundle["preprocessor"].transform(X)
     cluster_ids = bundle["kmeans"].predict(transformed)
 
     output = pd.DataFrame(index=df.index)
     id_col = supplied.get("lead_id")
+    if not id_col or id_col not in df.columns:
+        samples = df.head(3).replace({np.nan: None}).to_dict(orient="records")
+        ai_res = auto_detect_mapping([str(c) for c in df.columns], samples)
+        id_col = ai_res.get("mapping", {}).get("lead_id")
     output["lead_id"] = df[id_col].astype(str) if id_col and id_col in df.columns else [str(i + 1) for i in range(len(df))]
     output["cluster"] = cluster_ids.astype(int) + 1
 
@@ -378,6 +411,7 @@ async def predict(file: UploadFile = File(...), mapping: str | None = Form(None)
         "rows": int(len(output)),
         "mode": "supervised" if classifier is not None else "unsupervised",
         "model_id": model_id,
+        "mapping_used": {f: supplied.get(f) for f in FEATURES if supplied.get(f)},
         "results": output.replace({np.nan: None}).to_dict(orient="records"),
     }
 

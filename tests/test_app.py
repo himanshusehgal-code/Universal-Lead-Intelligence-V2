@@ -162,3 +162,26 @@ def test_model_switching_activation():
     # Try activating a non-existent model
     bad_resp = client.post("/api/models/non_existent_model/activate")
     assert bad_resp.status_code == 404
+
+def test_ai_auto_mapping_arbitrary_crm_headers():
+    # Test completely arbitrary column names from another CRM without supplying mapping
+    arbitrary_csv = """CRM_Lead_ID,Lead_Channel,Activity_Level,Buying_Intent,Requirement_Match,Inactive_Days
+CRM-881,Google Ads,High,High,High,2
+CRM-882,Cold Email,Low,Low,Low,60
+"""
+    csv_bytes = io.BytesIO(arbitrary_csv.encode("utf-8"))
+    
+    # 1. Test auto-map endpoint
+    map_resp = client.post("/api/auto-map", files={"file": ("crm.csv", io.BytesIO(arbitrary_csv.encode("utf-8")), "text/csv")})
+    assert map_resp.status_code == 200
+    map_data = map_resp.json()
+    assert map_data["mapping"]["lead_source"] == "Lead_Channel"
+    assert map_data["mapping"]["engagement_level"] == "Activity_Level"
+    
+    # 2. Test predict with zero mapping supplied (auto-resolves from headers)
+    pred_resp = client.post("/api/predict", files={"file": ("crm.csv", csv_bytes, "text/csv")})
+    assert pred_resp.status_code == 200
+    pred_data = pred_resp.json()
+    assert pred_data["rows"] == 2
+    assert pred_data["results"][0]["lead_id"] == "CRM-881"
+    assert "conversion_probability" in pred_data["results"][0]

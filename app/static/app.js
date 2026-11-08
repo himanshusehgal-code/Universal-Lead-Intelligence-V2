@@ -43,11 +43,19 @@ async function postForm(url, form){
 $("previewBtn").addEventListener("click",async()=>{
   const f=$("trainFile").files[0]; if(!f)return alert("Choose a training CSV first.");
   const form=new FormData();form.append("file",f);
-  $("preview").textContent="Reading file…";
+  $("preview").textContent="Reading file and auto-detecting schema with AI…";
   try{
     const d=await postForm("/api/preview",form);columns=d.columns;
-    $("preview").innerHTML=`<div class="notice"><b>${d.rows.toLocaleString()} rows</b> • ${columns.length} columns<br>${columns.map(escapeHtml).join(" · ")}</div>`;
+    const aiNotice = d.auto_mapping && Object.keys(d.auto_mapping).length ? `<br><span class="good" style="font-size:12px">✨ AI Auto-Detected columns (${d.mapping_provider})</span>` : "";
+    $("preview").innerHTML=`<div class="notice"><b>${d.rows.toLocaleString()} rows</b> • ${columns.length} columns${aiNotice}<br>${columns.map(escapeHtml).join(" · ")}</div>`;
     $("mappingFields").innerHTML=fields.map(([key,label,required])=>`<label class="field">${label}<select id="map_${key}">${optionsHtml(required)}</select></label>`).join("");
+    if (d.auto_mapping) {
+      fields.forEach(([key]) => {
+        const val = d.auto_mapping[key];
+        const el = $("map_" + key);
+        if (el && val && columns.includes(val)) el.value = val;
+      });
+    }
     $("mapping").classList.remove("hidden");
   }catch(e){$("preview").textContent=e.message;}
 });
@@ -66,12 +74,13 @@ $("trainBtn").addEventListener("click",async()=>{
 $("predictBtn").addEventListener("click",async()=>{
   const f=$("predictFile").files[0];if(!f)return alert("Choose a CSV to score.");
   const form=new FormData();form.append("file",f);
-  $("predictResult").textContent="Scoring leads…";
+  $("predictResult").textContent="Scoring leads with active model…";
   try{
     const d=await postForm("/api/predict",form);
     const rows=d.results;
     const cols=Object.keys(rows[0]||{});
-    $("predictResult").innerHTML=`<div class="notice">Mode: <b>${d.mode.toUpperCase()}</b> • ${d.rows} leads scored • Model: <code>${escapeHtml(d.model_id||"")}</code></div><div style="overflow-x:auto"><table><thead><tr>${cols.map(c=>`<th>${escapeHtml(c.replace(/_/g, ' '))}</th>`).join("")}</tr></thead><tbody>${rows.slice(0,200).map(row=>`<tr>${cols.map(c=>`<td>${formatCell(c, row[c])}</td>`).join("")}</tr>`).join("")}</tbody></table></div><p class="small">Showing up to 200 rows. API response contains all rows.</p>`;
+    const mapInfo = d.mapping_used ? `<div style="font-size:12px;margin-top:6px;color:#554c60">Auto-resolved Mapping: ${Object.entries(d.mapping_used).map(([k,v])=>`<code>${escapeHtml(k)} &rarr; ${escapeHtml(v)}</code>`).join(' &bull; ')}</div>` : '';
+    $("predictResult").innerHTML=`<div class="notice">Mode: <b>${d.mode.toUpperCase()}</b> • ${d.rows} leads scored • Model: <code>${escapeHtml(d.model_id||"")}</code>${mapInfo}</div><div style="overflow-x:auto"><table><thead><tr>${cols.map(c=>`<th>${escapeHtml(c.replace(/_/g, ' '))}</th>`).join("")}</tr></thead><tbody>${rows.slice(0,200).map(row=>`<tr>${cols.map(c=>`<td>${formatCell(c, row[c])}</td>`).join("")}</tr>`).join("")}</tbody></table></div><p class="small">Showing up to 200 rows. API response contains all rows.</p>`;
   }catch(e){$("predictResult").textContent=e.message;}
 });
 async function refreshStatus(){
