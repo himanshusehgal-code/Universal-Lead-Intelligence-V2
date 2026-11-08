@@ -14,6 +14,23 @@ function optionsHtml(required) {
     columns.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
 }
 function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function formatCell(col, val) {
+  if (val === null || val === undefined || val === "") return "";
+  if (col === "conversion_probability" || col === "cluster_historical_conversion_rate") {
+    const num = Number(val);
+    if (!isNaN(num)) {
+      const pct = (num * 100).toFixed(1) + "%";
+      return `<span class="prob-val">${pct}</span> <span class="muted" style="font-size:11px">(${num.toFixed(4)})</span>`;
+    }
+  }
+  if (col === "priority") {
+    const str = String(val);
+    if (str.startsWith("P1")) return `<span class="badge badge-p1">${escapeHtml(str)}</span>`;
+    if (str.startsWith("P2")) return `<span class="badge badge-p2">${escapeHtml(str)}</span>`;
+    if (str.startsWith("P3")) return `<span class="badge badge-p3">${escapeHtml(str)}</span>`;
+  }
+  return escapeHtml(val);
+}
 function getMapping(){
   const obj={};
   fields.forEach(([key])=>{const el=$("map_"+key); if(el)obj[key]=el.value||null;});
@@ -54,7 +71,7 @@ $("predictBtn").addEventListener("click",async()=>{
     const d=await postForm("/api/predict",form);
     const rows=d.results;
     const cols=Object.keys(rows[0]||{});
-    $("predictResult").innerHTML=`<div class="notice">Mode: <b>${d.mode}</b> • ${d.rows} leads scored</div><div style="overflow-x:auto"><table><thead><tr>${cols.map(c=>`<th>${escapeHtml(c)}</th>`).join("")}</tr></thead><tbody>${rows.slice(0,200).map(row=>`<tr>${cols.map(c=>`<td>${escapeHtml(row[c]??"")}</td>`).join("")}</tr>`).join("")}</tbody></table></div><p class="small">Showing up to 200 rows. API response contains all rows.</p>`;
+    $("predictResult").innerHTML=`<div class="notice">Mode: <b>${d.mode.toUpperCase()}</b> • ${d.rows} leads scored • Model: <code>${escapeHtml(d.model_id||"")}</code></div><div style="overflow-x:auto"><table><thead><tr>${cols.map(c=>`<th>${escapeHtml(c.replace(/_/g, ' '))}</th>`).join("")}</tr></thead><tbody>${rows.slice(0,200).map(row=>`<tr>${cols.map(c=>`<td>${formatCell(c, row[c])}</td>`).join("")}</tr>`).join("")}</tbody></table></div><p class="small">Showing up to 200 rows. API response contains all rows.</p>`;
   }catch(e){$("predictResult").textContent=e.message;}
 });
 async function refreshStatus(){

@@ -13,5 +13,10 @@ button.secondary{background:#ece7f1;color:#43205b}.grid{display:grid;grid-templa
 table{border-collapse:collapse;width:100%;font-size:13px;margin-top:12px;display:block;overflow-x:auto}
 th,td{border-bottom:1px solid #e9e7ed;padding:9px;text-align:left;white-space:nowrap}
 th{background:#f5f2f7}.good{color:#18734a;font-weight:700}.bad{color:#a23a36}
+.badge{padding:4px 9px;border-radius:12px;font-size:11px;font-weight:700;display:inline-block}
+.badge-p1{background:#e6f6ee;color:#18734a;border:1px solid #c2ebda}
+.badge-p2{background:#fff5e5;color:#9b5a00;border:1px solid #fae1ba}
+.badge-p3{background:#f0edf4;color:#605d68;border:1px solid #dedae5}
+.prob-val{font-weight:700;color:#2c1340;font-size:14px}
 footer{font-size:12px;padding:20px 4px}
 @media(max-width:520px){.panel{padding:16px}.wrap{padding:18px 12px 40px}}
