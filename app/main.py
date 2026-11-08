@@ -21,7 +21,8 @@ from pydantic import BaseModel
 
 from sklearn.cluster import KMeans
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier, VotingClassifier
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
@@ -175,7 +176,7 @@ def build_preprocessor() -> ColumnTransformer:
     numeric = ["days_since_interaction"]
     cat_pipe = Pipeline([
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=2)),
+        ("onehot", OneHotEncoder(sparse_output=False, handle_unknown="ignore", min_frequency=2)),
     ])
     num_pipe = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
@@ -541,12 +542,27 @@ async def train(
             X_train, X_test, y_train, y_test = train_test_split(
                 X_valid, y_valid, test_size=0.2, random_state=42, stratify=stratify
             )
+            rf = RandomForestClassifier(
+                n_estimators=300, min_samples_leaf=3, class_weight="balanced",
+                random_state=42, n_jobs=-1
+            )
+            gbdt = HistGradientBoostingClassifier(
+                max_iter=150, learning_rate=0.06, min_samples_leaf=15,
+                l2_regularization=1.5, random_state=42
+            )
+            base_ensemble = VotingClassifier(
+                estimators=[("rf", rf), ("gbdt", gbdt)],
+                voting="soft",
+                weights=[0.5, 0.5]
+            )
+            if len(X_train) >= 60 and y_train.value_counts().min() >= 10:
+                final_model = CalibratedClassifierCV(estimator=base_ensemble, method="sigmoid", cv=3)
+            else:
+                final_model = base_ensemble
+
             classifier = Pipeline([
                 ("preprocessor", build_preprocessor()),
-                ("model", RandomForestClassifier(
-                    n_estimators=300, min_samples_leaf=3, class_weight="balanced",
-                    random_state=42, n_jobs=-1
-                )),
+                ("model", final_model),
             ])
             classifier.fit(X_train, y_train)
             pred = classifier.predict(X_test)
@@ -609,7 +625,7 @@ async def train(
         "dataset_id": dataset_id,
         "workspace_id": workspace_id,
         "model_name": "Universal Lead Conversion",
-        "algorithm": "RandomForest + KMeans" if classifier is not None else "KMeans",
+        "algorithm": "Ensemble (HistGradientBoosting + RandomForest)" if classifier is not None else "KMeans",
         "features": FEATURES,
         "mapping": map_dict,
         "training_records": int(len(X)),
