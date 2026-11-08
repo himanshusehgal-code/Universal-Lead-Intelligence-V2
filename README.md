@@ -1,112 +1,146 @@
-# Universal Lead Intelligence
+# Universal Lead Intelligence V2
 
-A FastAPI application for importing lead CSVs from different CRMs, mapping five standard fields, discovering lead segments with K-Means, and (when outcome labels are available) training a supervised conversion model.
+A self-contained AI-powered Lead Prioritization platform backed by a free, local SQLite database (`data/lead_intelligence.sqlite3`).
 
-## Five standard input parameters
+Universal Lead Intelligence connects to your CRM databases, live Google Sheets, or CSV uploads, maps schemas automatically with AI, and scores incoming leads with supervised machine learning and unsupervised clustering. **Crucially, it preserves 100% of your original source table columns in-place while appending prioritized conversion scores.**
 
-1. `lead_source`
-2. `engagement_level`
-3. `interest_level`
-4. `requirement_fit`
-5. `days_since_interaction`
+---
 
-Optional columns:
-- `lead_id`: source record identifier
-- `conversion_status`: historical outcome, using values such as `Converted`, `Lost`, `Won`, `Not Converted`, `Yes`, or `No`
+## 🌟 Key Features
 
-## Run locally
+1. **Multi-Workspace Management & User Simulation**:
+   - Pre-configured with distinct industry workspaces:
+     - **Apex Motors Dealership** (Automotive CRM leads & showroom conversions)
+     - **HoseExperts Industrial B2B** (Hydraulic parts, wholesale orders & quote requests)
+     - **CloudFlow Enterprise SaaS** (Inbound demos, free-trial conversions & enterprise accounts)
+   - Simulated email login (`analyst@apexmotors.com`, etc.) to track scoring history per user.
+   - Dynamic workspace creation with custom industry settings.
 
-Python 3.11 is recommended.
+2. **Multi-Source Connectors**:
+   - **Free Local SQLite Connector**: Connects directly to `data/lead_intelligence.sqlite3`. Pre-seeded with:
+     - `crm_leads_lake`: 50 rich CRM leads (deal sizes, contact info, notes, regions).
+     - `inbound_pipeline_raw`: Non-standard CRM headers demonstrating AI schema auto-detection.
+     - Custom read-only `SELECT` query execution.
+   - **Google Sheets Connector**: Connects to any public/published Google Sheet CSV link with live data streaming.
+   - **CSV File Upload**: High-performance streaming parser supporting up to 1,000,000 rows.
+   - **REST API Endpoint**: Direct JSON ingestion endpoint (`POST /api/connectors/api/score`) for backend CRM integrations.
+
+3. **In-Place Enriched Lead Reporting**:
+   - **Zero Data Loss**: Keeps every customer column intact (`company_name`, `contact_person`, `phone`, `email`, `deal_value_usd`, `notes`, etc.).
+   - **Appends Machine Learning Columns**:
+     - `🎯 Conversion %` (`conversion_probability_pct`, e.g., `84.2%`)
+     - `⚡ Priority Badge` (`P1 - Contact first`, `P2 - Follow up`, `P3 - Nurture`)
+     - `👥 Segment Cluster` (`Cluster 1` through `Cluster N`)
+     - `📊 Potential Status` (`High potential`, `Medium potential`, `Low potential`)
+   - **Instant CSV Export**: One-click download of the complete enriched table.
+   - **Interactive Filtering**: Filter instantly by `P1 Leads Only`, `P2`, or `P3`.
+
+4. **Approach B: AI Schema & Vocabulary Auto-Mapper**:
+   - Fuzzy synonym matching across diverse CRM terminology (`Solution Alignment` $\rightarrow$ `requirement_fit`, `Days Since Touchpoint` $\rightarrow$ `days_since_interaction`, `Quiet` $\rightarrow$ `Low`, `Very Active` $\rightarrow$ `High`).
+   - Seamless compatibility with Salesforce, HubSpot, Zoho, Pipedrive, and custom internal SQL databases without manual column mapping.
+
+---
+
+## 🚀 Quickstart (Local Run)
+
+Universal Lead Intelligence is 100% free and self-contained with no external cloud API or paid database dependencies.
 
 ```bash
-python -m venv .venv
+# 1. Activate your virtual environment (if using one)
 # Windows PowerShell:
-.venv\Scripts\Activate.ps1
-# macOS/Linux:
-source .venv/bin/activate
+# .venv\Scripts\Activate.ps1
 
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+# 2. Start the FastAPI server
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Open `http://127.0.0.1:8000`.
+Open your browser to:
+- **Interactive Web App**: [http://localhost:8000](http://localhost:8000)
+- **Interactive Swagger API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **ReDoc API Reference**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
-## Workflow
+---
 
-1. Export historical lead data from a CRM as CSV.
-2. Upload it in the Training section.
-3. Map all five required parameters to the corresponding source columns.
-4. Optionally map the historical outcome column.
-5. Train the model.
-6. Upload a new-leads CSV to score it.
+## 🔌 Using Connectors
 
-The `/api/train` endpoint accepts multipart fields:
-- `file`: CSV file
-- `mapping`: JSON object, e.g.
-  `{"lead_id":"Lead ID","lead_source":"Source","engagement_level":"Activity Level","interest_level":"Interest","requirement_fit":"Product Fit","days_since_interaction":"Days Since Contact","conversion_status":"Status"}`
-- `clusters`: integer from 2 to 12
+### 1. Local SQLite Connector
+In the web UI:
+1. Select **Tab 1: Multi-Source Connectors** $\rightarrow$ **Free Local SQLite DB**.
+2. Select `crm_leads_lake` or enter a query:
+   ```sql
+   SELECT * FROM crm_leads_lake LIMIT 50;
+   ```
+3. Click **"⚡ Score Leads & Generate In-Place Report"**.
+4. The dashboard automatically switches to **Tab 2: In-Place Enriched Report** displaying all customer details alongside AI scores.
 
-The `/api/predict` endpoint accepts:
-- `file`: CSV file
-- `mapping`: optional JSON mapping. If omitted, training mapping is reused.
+### 2. Google Sheets Connector
+1. Select **Tab 1** $\rightarrow$ **Google Sheets**.
+2. Paste any public Google Sheet link (e.g. `https://docs.google.com/spreadsheets/d/{ID}/edit?usp=sharing`).
+3. Click **"⚡ Score Google Sheet Leads"**.
 
-API documentation is available at `/docs`.
+### 3. External CRM Server / REST API
+External systems can send JSON arrays directly to score leads on the fly:
+```bash
+curl -X POST "http://localhost:8000/api/connectors/api/score" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "ws_automotive",
+    "data": [
+      {
+        "lead_id": "LEAD-101",
+        "company_name": "Vertex Dynamics",
+        "contact_person": "Sarah Connor",
+        "lead_source": "Website",
+        "engagement_level": "High",
+        "interest_level": "High",
+        "requirement_fit": "High",
+        "days_since_interaction": 2,
+        "deal_value_usd": 45000
+      }
+    ]
+  }'
+```
 
-## Prediction interpretation
+---
 
-- If the training CSV contains enough clean Converted/Lost outcomes, the app trains a Random Forest classifier and returns a model-estimated conversion probability.
-- If no usable outcome labels exist, the app returns unsupervised cluster groups only. A cluster is not a conversion probability.
-- If labels were mapped but are too sparse, the app reports that and keeps unsupervised clustering.
+## 🧪 Automated Test Suite
 
-The default outcome parser recognizes:
-- Positive: `Converted`, `Convert`, `Won`, `Yes`, `1`, `True`, `Customer`, `Sale`, `Sold`
-- Negative: `Not Converted`, `Lost`, `No`, `0`, `False`, `Open`, `Pending`, `Unconverted`
+Run the full pytest suite (15 automated tests covering workspaces, connectors, ML persistence, SQLite audit logging, and AI auto-mapping):
 
-Adapt this list to your source system's actual status values before production use.
+```bash
+python -m pytest tests/
+```
 
-## Important production notes
+---
 
-- The saved model is stored under `MODEL_DIR`. On Render, the included `render.yaml` provisions a persistent disk for it.
-- Original training CSV files are retained in `MODEL_DIR/datasets/raw/` for audit and future retraining.
-- Standardized five-feature datasets are stored in `MODEL_DIR/datasets/processed/` as Parquet (CSV fallback if Parquet support is unavailable).
-- Versioned model artifacts are stored in `MODEL_DIR/models/` as Joblib files.
-- Model metadata and the active-model pointer are stored as JSON in `MODEL_DIR/metadata/` and `MODEL_DIR/active_model.json`.
-- Prediction history is stored in `MODEL_DIR/prediction_history.sqlite3`.
-- Historical training data is not needed for ordinary predictions after the model has been trained. Keep it for validation, audit and retraining.
-- JSON is used for small metadata/configuration records, not as a replacement for the Joblib model artifact or Parquet training data.
-- This V2 starter stores multiple model versions but has one active model per deployment. It is not yet tenant-isolated. Add tenant authentication and separate dataset/model/prediction storage per customer before onboarding multiple businesses.
-- Do not train and evaluate on the same rows. The supervised model uses an 80/20 train/test split, but robust production validation should also use time-based splits and external datasets.
-- Check data quality, class balance, leakage, calibration, and performance by industry and lead source.
-- Do not treat synthetic data performance as evidence of real-world sales performance.
-- Keep customer personal data secure; use anonymized lead IDs for experimentation.
-- For large-scale ingestion, use background jobs, object storage, a database, and batch prediction rather than sending very large CSVs through a web request.
+## 📁 Project Architecture
 
+```
+universal_lead_intelligence/
+├── app/
+│   ├── ai_mapper.py          # Fuzzy semantic schema mapper & vocabulary normalizer
+│   ├── connectors.py         # SQLite, Google Sheets & in-place enrichment engine
+│   ├── database.py           # SQLite database layer & workspace manager
+│   ├── main.py               # FastAPI application & REST endpoints
+│   ├── static/
+│   │   ├── app.js            # UI interaction, tabs, filtering, and CSV export
+│   │   └── style.css         # Modern styling & responsive table components
+│   └── templates/
+│       └── index.html        # Multi-tab workspace dashboard
+├── data/
+│   ├── lead_intelligence.sqlite3 # Free local database (workspaces, CRM lake, history)
+│   ├── active_model.json         # Active model pointer
+│   ├── datasets/                 # Raw and processed training datasets
+│   ├── metadata/                 # Model metrics and training metadata
+│   └── models/                   # Versioned Joblib model artifacts
+├── tests/
+│   ├── test_app.py                      # Core ML & API tests
+│   └── test_connectors_and_workspaces.py # Connectors, workspaces & in-place tests
+├── requirements.txt
+└── README.md
+```
 
-## Product documentation
+---
 
-The `/docs` folder is part of the product repository and should be maintained with every API/code release:
-
-- `docs/API_DOCUMENTATION.md` — endpoint reference, request/response examples, error codes, cURL, Python and JavaScript examples.
-- `docs/API_AUTHENTICATION.md` — current authentication status and production security requirements.
-- `docs/API_INTEGRATION_GUIDE.md` — how CRM/ERP applications should connect.
-- `docs/COLUMN_MAPPING_GUIDE.md` — standard field definitions and mapping examples.
-- `docs/ML_TRAINING_GUIDE.md` — learning modes, evaluation and model limitations.
-- `docs/DATABASE_SCHEMA.md` — current V2 storage and recommended PostgreSQL SaaS schema.
-- `docs/DEPLOYMENT_GUIDE.md` — local and Render deployment.
-- `docs/TROUBLESHOOTING.md` — common errors and fixes.
-
-Interactive API documentation is generated by FastAPI at `/docs`; ReDoc is at `/redoc`; the OpenAPI schema is at `/openapi.json`.
-
-**Security:** This V2 starter currently has no API authentication and uses one active model per deployment. Do not expose it publicly with real customer data until tenant isolation and authentication are implemented.
-
-
-## V2 model and dataset management APIs
-
-- `GET /api/datasets` — list retained training datasets.
-- `GET /api/models` — list saved model versions and identify the active model.
-- `POST /api/models/{model_id}/activate` — switch the active model version.
-- `GET /api/predictions?limit=100` — read recent prediction history (maximum 1,000).
-
-See `docs/API_DOCUMENTATION.md` for full request/response details.
-- `docs/DATA_STORAGE_LIFECYCLE.md` — explains what is retained and what inference loads.
-- `PROMPT_FOR_NEXT_DEVELOPMENT.md` — reusable engineering prompt for this architecture.
+## 📄 License
+MIT License. Free for open source, commercial, and research use.

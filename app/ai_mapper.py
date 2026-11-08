@@ -21,34 +21,109 @@ STANDARD_FIELDS = {
 FIELD_ALIASES = {
     "lead_id": [
         "id", "lead_id", "leadid", "crm_id", "crmid", "customer_id", "customerid",
-        "client_id", "prospect_id", "uid", "record_id"
+        "client_id", "prospect_id", "uid", "record_id", "prospect_code", "prospectcode",
+        "prospect", "lead_code", "leadcode", "code", "client_code"
     ],
     "lead_source": [
         "leadsource", "lead_source", "source", "channel", "lead_channel", "campaign",
-        "utm_source", "origin", "medium", "acquisition_channel", "lead_origin", "source_channel"
+        "utm_source", "origin", "medium", "acquisition_channel", "acquisitionchannel",
+        "lead_origin", "source_channel", "channel_name"
     ],
     "engagement_level": [
         "engagement", "engagement_level", "rating", "activity", "activity_level",
-        "activity_score", "customer_engagement", "touches", "interactions", "contact_level"
+        "activity_score", "customer_engagement", "touches", "interactions", "contact_level",
+        "activity_band", "activityband", "engagement_score"
     ],
     "interest_level": [
         "interest", "interest_level", "intent", "lead_interest", "buying_intent",
-        "purchase_timeline", "purchase_timeline__c", "timeline", "urgency", "temperature", "enquiry_temp"
+        "buyingintent", "purchase_timeline", "purchase_timeline__c", "timeline", "urgency",
+        "temperature", "enquiry_temp", "intent_level"
     ],
     "requirement_fit": [
         "requirement_fit", "product_fit", "requirement_match", "need_fit", "fit",
-        "condition_interest", "condition_interest__c", "vehicle_interest", "match", "suitability"
+        "condition_interest", "condition_interest__c", "vehicle_interest", "match", "suitability",
+        "solution_alignment", "solutionalignment", "alignment", "solution", "product_alignment",
+        "solution_fit", "need_match", "alignment_score", "fit_score"
     ],
     "days_since_interaction": [
         "days_since_interaction", "days_since_call", "last_contact_days", "inactive_days",
         "days_ago", "days_since_contact", "lastactivitydate", "last_activity_date", "last_interaction",
-        "contact_age", "lastactivity", "createddate"
+        "contact_age", "lastactivity", "createddate", "days_since_touchpoint", "dayssincetouchpoint",
+        "touchpoint", "touchpoints", "last_touch", "touch_days", "days_since_last_touch",
+        "contact_days", "touchpoint_days", "recency_days"
     ],
     "conversion_status": [
         "conversion_status", "status", "isconverted", "converted", "deal_result",
-        "outcome", "final_status", "stage", "won", "result"
+        "dealresult", "outcome", "final_status", "stage", "won", "result", "sale_result"
     ]
 }
+
+# Cross-CRM category value standardization mapping
+VALUE_SYNONYMS = {
+    # High / Positive / Active
+    "very active": "High",
+    "active": "High",
+    "hot": "High",
+    "strong intent": "High",
+    "strong": "High",
+    "high": "High",
+    "immediate": "High",
+    "immediately": "High",
+    "excellent match": "High",
+    "excellent": "High",
+    "perfect": "High",
+    "great": "High",
+    
+    # Medium / Moderate / Considering
+    "moderately active": "Medium",
+    "moderate": "Medium",
+    "warm": "Medium",
+    "considering": "Medium",
+    "medium": "Medium",
+    "mid": "Medium",
+    "1-3 months": "Medium",
+    "partial match": "Medium",
+    "fair": "Medium",
+    
+    # Low / Weak / Inactive
+    "quiet": "Low",
+    "inactive": "Low",
+    "cold": "Low",
+    "early stage": "Low",
+    "weak": "Low",
+    "low": "Low",
+    "3-6 months": "Low",
+    "over 6 months": "Low",
+    "weak match": "Low",
+    "poor": "Low",
+    "no match": "Low",
+
+    # Lead source synonyms
+    "inbound web": "Website",
+    "web": "Website",
+    "organic search": "Website",
+    "social campaign": "Facebook",
+    "social": "Facebook",
+    "social media": "Facebook",
+    "customer referral": "Referral",
+    "word of mouth": "Referral",
+    "paid search": "Google Ads",
+    "search ads": "Google Ads",
+    "industry event": "Trade Show",
+    "event": "Trade Show",
+    "conference": "Trade Show",
+    "outbound prospecting": "Cold Call",
+    "outbound": "Cold Call",
+    "cold email": "Cold Call"
+}
+
+def normalize_category_value(val: Any) -> str:
+    """Translates arbitrary CRM category terms into canonical standard levels."""
+    if val is None:
+        return "Unknown"
+    s = str(val).strip()
+    s_lower = s.lower()
+    return VALUE_SYNONYMS.get(s_lower, s)
 
 def clean_name(name: str) -> str:
     """Normalize column header for fuzzy comparison."""

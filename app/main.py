@@ -13,11 +13,11 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
+from pydantic import BaseModel
 
 from sklearn.cluster import KMeans
 from sklearn.compose import ColumnTransformer
@@ -27,12 +27,29 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.inspection import permutation_importance
 
-from app.ai_mapper import auto_detect_mapping
+from app.ai_mapper import auto_detect_mapping, normalize_category_value
+from app.database import (
+    init_database,
+    list_workspaces,
+    get_workspace,
+    create_workspace,
+    update_workspace_model,
+    authenticate_user,
+    get_sqlite_tables,
+    execute_sqlite_query,
+    record_enriched_leads,
+    get_db_path,
+)
+from app.connectors import (
+    fetch_google_sheet_dataframe,
+    enrich_lead_dataframe,
+    transform_google_sheet_url,
+)
 
 APP_DIR = Path(__file__).resolve().parent
-MODEL_DIR = Path(os.getenv("MODEL_DIR", "data"))
+ROOT_DIR = APP_DIR.parent
+MODEL_DIR = Path(os.getenv("MODEL_DIR", str(ROOT_DIR / "data")))
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_PATH = MODEL_DIR / "lead_model.joblib"  # backward-compatible active model path
 RAW_DIR = MODEL_DIR / "datasets" / "raw"
@@ -41,8 +58,12 @@ MODELS_DIR = MODEL_DIR / "models"
 METADATA_DIR = MODEL_DIR / "metadata"
 PREDICTIONS_DB = MODEL_DIR / "prediction_history.sqlite3"
 ACTIVE_MODEL_FILE = MODEL_DIR / "active_model.json"
+
 for directory in (RAW_DIR, PROCESSED_DIR, MODELS_DIR, METADATA_DIR):
     directory.mkdir(parents=True, exist_ok=True)
+
+# Initialize SQLite database and seed demo tables
+init_database()
 
 
 def db_connection():
@@ -77,8 +98,9 @@ def load_active_bundle():
         raise HTTPException(400, "No trained model found. Train a model first.")
     return joblib.load(path)
 
+
 FEATURES = ["lead_source", "engagement_level", "interest_level", "requirement_fit", "days_since_interaction"]
-app = FastAPI(title="Universal Lead Intelligence", version="1.0.0")
+app = FastAPI(title="Universal Lead Intelligence V2", version="2.0.0")
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
@@ -140,7 +162,8 @@ def normalize_features(df: pd.DataFrame, mapping: dict[str, Any], require_all: b
                 numeric = (pd.Timestamp.utcnow().tz_localize(None).normalize() - dates.dt.tz_localize(None).dt.normalize()).dt.days
             result[feature] = numeric.fillna(numeric.median() if numeric.notna().any() else 0).clip(lower=0)
         else:
-            result[feature] = series.astype("string").fillna("Unknown").str.strip().replace("", "Unknown").astype(str)
+            raw_series = series.astype("string").fillna("Unknown").str.strip().replace("", "Unknown")
+            result[feature] = raw_series.map(normalize_category_value).astype(str)
 
     return result[FEATURES]
 
@@ -179,6 +202,246 @@ def health():
     return {"status": "ok", "model_exists": MODEL_PATH.exists()}
 
 
+# -------------------------------------------------------------
+# WORKSPACE & AUTHENTICATION ENDPOINTS
+# -------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    email: str
+    name: str = ""
+    workspace_id: str | None = None
+
+
+class CreateWorkspaceRequest(BaseModel):
+    name: str
+    description: str = ""
+    industry: str = "General"
+
+
+@app.get("/api/workspaces")
+def get_all_workspaces():
+    return {"workspaces": list_workspaces()}
+
+
+@app.post("/api/workspaces")
+def create_new_workspace(req: CreateWorkspaceRequest):
+    if not req.name.strip():
+        raise HTTPException(400, "Workspace name cannot be empty.")
+    ws = create_workspace(name=req.name.strip(), description=req.description, industry=req.industry)
+    return {"message": "Workspace created successfully.", "workspace": ws}
+
+
+@app.post("/api/workspaces/{workspace_id}/activate")
+def activate_workspace(workspace_id: str):
+    ws = get_workspace(workspace_id)
+    if not ws:
+        raise HTTPException(404, "Workspace not found.")
+    # If workspace has an assigned model, activate it
+    active_model = ws.get("active_model_id")
+    if active_model:
+        meta_file = METADATA_DIR / f"{active_model}.json"
+        if meta_file.exists():
+            metadata = json.loads(meta_file.read_text(encoding="utf-8"))
+            artifact = metadata.get("artifact")
+            if artifact:
+                ACTIVE_MODEL_FILE.write_text(json.dumps({"model_id": active_model, "artifact": artifact}, indent=2), encoding="utf-8")
+    return {"message": f"Workspace '{ws['name']}' activated.", "workspace": ws}
+
+
+@app.post("/api/auth/login")
+def login_simulation(req: LoginRequest):
+    if not req.email.strip() or "@" not in req.email:
+        raise HTTPException(400, "Please provide a valid email address.")
+    user = authenticate_user(email=req.email, name=req.name, workspace_id=req.workspace_id)
+    return {"message": f"Welcome back, {user['name']}.", "user": user}
+
+
+# -------------------------------------------------------------
+# CONNECTORS: SQLITE DATABASE ENDPOINTS
+# -------------------------------------------------------------
+
+class SQLiteQueryRequest(BaseModel):
+    query: str
+    workspace_id: str = "ws_automotive"
+    user_email: str | None = None
+    mapping: dict[str, Any] | None = None
+
+
+@app.get("/api/connectors/sqlite/tables")
+def list_available_tables():
+    """Lists queryable tables in the local SQLite database data/lead_intelligence.sqlite3."""
+    tables = get_sqlite_tables()
+    return {
+        "database_file": str(get_db_path()),
+        "tables": tables
+    }
+
+
+@app.post("/api/connectors/sqlite/preview")
+def preview_sqlite_table(req: SQLiteQueryRequest):
+    """Preview rows from a SQLite table or SELECT query."""
+    try:
+        rows = execute_sqlite_query(req.query, max_rows=5)
+    except Exception as exc:
+        raise HTTPException(400, f"SQL Query Error: {exc}")
+    if not rows:
+        return {"rows": 0, "columns": [], "sample": []}
+    cols = list(rows[0].keys())
+    ai_res = auto_detect_mapping(cols, rows[:3])
+    return {
+        "rows": len(rows),
+        "columns": cols,
+        "sample": rows,
+        "auto_mapping": ai_res.get("mapping", {}),
+        "mapping_provider": ai_res.get("provider", "semantic_nlp")
+    }
+
+
+@app.post("/api/connectors/sqlite/score")
+def score_sqlite_leads(req: SQLiteQueryRequest):
+    """
+    Executes SELECT query against local SQLite, scores leads using the active ML model,
+    retains ALL original table columns in-place, and appends calculated ML columns.
+    """
+    bundle = load_active_bundle()
+    try:
+        raw_rows = execute_sqlite_query(req.query, max_rows=1000)
+    except Exception as exc:
+        raise HTTPException(400, f"SQL Query Error: {exc}")
+    if not raw_rows:
+        raise HTTPException(400, "No records returned from SQL query.")
+
+    df = pd.DataFrame(raw_rows)
+    enriched = enrich_lead_dataframe(df, bundle, req.mapping)
+
+    active_meta = {}
+    if ACTIVE_MODEL_FILE.exists():
+        try:
+            active_meta = json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    model_id = active_meta.get("model_id", "active_model")
+    enriched["model_id"] = model_id
+
+    # Persist in SQLite audit history
+    record_enriched_leads(
+        workspace_id=req.workspace_id,
+        user_email=req.user_email,
+        source_type="sqlite",
+        source_name=req.query[:80],
+        model_id=model_id,
+        leads=enriched["results"]
+    )
+    return enriched
+
+
+# -------------------------------------------------------------
+# CONNECTORS: GOOGLE SHEETS ENDPOINTS
+# -------------------------------------------------------------
+
+class GoogleSheetRequest(BaseModel):
+    sheet_url: str
+    workspace_id: str = "ws_automotive"
+    user_email: str | None = None
+    mapping: dict[str, Any] | None = None
+
+
+@app.post("/api/connectors/googlesheets/preview")
+def preview_google_sheet(req: GoogleSheetRequest):
+    """Downloads public Google Sheet and returns preview of columns and auto-mapping."""
+    df = fetch_google_sheet_dataframe(req.sheet_url)
+    samples = df.head(5).replace({np.nan: None}).to_dict(orient="records")
+    cols = [str(c) for c in df.columns]
+    ai_res = auto_detect_mapping(cols, samples[:3])
+    return {
+        "sheet_url": req.sheet_url,
+        "export_url": transform_google_sheet_url(req.sheet_url),
+        "rows": len(df),
+        "columns": cols,
+        "sample": samples,
+        "auto_mapping": ai_res.get("mapping", {}),
+        "mapping_provider": ai_res.get("provider", "semantic_nlp")
+    }
+
+
+@app.post("/api/connectors/googlesheets/score")
+def score_google_sheet(req: GoogleSheetRequest):
+    """
+    Downloads live Google Sheet CSV, scores leads with ML model,
+    retains ALL original spreadsheet columns, and appends calculated predictions.
+    """
+    bundle = load_active_bundle()
+    df = fetch_google_sheet_dataframe(req.sheet_url)
+    enriched = enrich_lead_dataframe(df, bundle, req.mapping)
+
+    active_meta = {}
+    if ACTIVE_MODEL_FILE.exists():
+        try:
+            active_meta = json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    model_id = active_meta.get("model_id", "active_model")
+    enriched["model_id"] = model_id
+
+    # Persist in SQLite audit history
+    record_enriched_leads(
+        workspace_id=req.workspace_id,
+        user_email=req.user_email,
+        source_type="googlesheets",
+        source_name=req.sheet_url[:80],
+        model_id=model_id,
+        leads=enriched["results"]
+    )
+    return enriched
+
+
+# -------------------------------------------------------------
+# CONNECTORS: DIRECT JSON API SCORING
+# -------------------------------------------------------------
+
+class APIScoreRequest(BaseModel):
+    data: list[dict[str, Any]]
+    workspace_id: str = "ws_automotive"
+    user_email: str | None = None
+    mapping: dict[str, Any] | None = None
+
+
+@app.post("/api/connectors/api/score")
+def score_api_data(req: APIScoreRequest):
+    """
+    Endpoint for external servers/databases to send raw JSON leads,
+    score them in-place, and receive back the exact table with calculated columns.
+    """
+    if not req.data:
+        raise HTTPException(400, "Lead data array is empty.")
+    bundle = load_active_bundle()
+    df = pd.DataFrame(req.data)
+    enriched = enrich_lead_dataframe(df, bundle, req.mapping)
+
+    active_meta = {}
+    if ACTIVE_MODEL_FILE.exists():
+        try:
+            active_meta = json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    model_id = active_meta.get("model_id", "active_model")
+    enriched["model_id"] = model_id
+
+    record_enriched_leads(
+        workspace_id=req.workspace_id,
+        user_email=req.user_email,
+        source_type="api_payload",
+        source_name="direct_api",
+        model_id=model_id,
+        leads=enriched["results"]
+    )
+    return enriched
+
+
+# -------------------------------------------------------------
+# CORE ML TRAINING & IN-PLACE CSV PREDICTION
+# -------------------------------------------------------------
+
 @app.post("/api/preview")
 async def preview(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".csv"):
@@ -210,6 +473,7 @@ async def train(
     file: UploadFile = File(...),
     mapping: str = Form(...),
     clusters: int = Form(4),
+    workspace_id: str = Form("ws_automotive"),
 ):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(400, "Please upload a CSV file.")
@@ -230,7 +494,6 @@ async def train(
     classifier = None
     metrics = None
     cluster_outcomes = {}
-    feature_importance = []
 
     if label_col:
         y_raw = df[label_col].astype("string").fillna("").str.strip().str.lower()
@@ -263,7 +526,6 @@ async def train(
                 "f1": round(float(f1_score(y_test, pred, zero_division=0)), 4),
                 "roc_auc": round(float(roc_auc_score(y_test, prob)), 4) if y_test.nunique() == 2 else None,
             }
-            # Cluster conversion rates are descriptive and help explain discovered segments.
             for cid in sorted(set(cluster_ids)):
                 idx = np.where(cluster_ids == cid)[0]
                 usable = [i for i in idx if valid.iloc[i]]
@@ -285,8 +547,9 @@ async def train(
         "training_rows": int(len(X)),
         "trained_at": pd.Timestamp.utcnow().isoformat(),
         "metrics": metrics,
+        "workspace_id": workspace_id,
     }
-    # Keep original source data for audit/retraining, and a compact standardized dataset.
+
     model_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
     dataset_id = "dataset_" + model_id
     raw_path = RAW_DIR / f"{dataset_id}.csv"
@@ -306,11 +569,12 @@ async def train(
     artifact_name = f"{model_id}.joblib"
     artifact_path = MODELS_DIR / artifact_name
     joblib.dump(bundle, artifact_path)
-    # Keep a legacy copy for compatibility with V1 tooling.
     joblib.dump(bundle, MODEL_PATH)
+
     metadata = {
         "model_id": model_id,
         "dataset_id": dataset_id,
+        "workspace_id": workspace_id,
         "model_name": "Universal Lead Conversion",
         "algorithm": "RandomForest + KMeans" if classifier is not None else "KMeans",
         "features": FEATURES,
@@ -329,6 +593,10 @@ async def train(
     }
     (METADATA_DIR / f"{model_id}.json").write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
     ACTIVE_MODEL_FILE.write_text(json.dumps({"model_id": model_id, "artifact": artifact_name}, indent=2), encoding="utf-8")
+
+    # Link model to workspace in SQLite
+    update_workspace_model(workspace_id, model_id)
+
     counts = pd.Series(cluster_ids).value_counts().sort_index()
     return {
         "message": "Training completed.",
@@ -339,6 +607,7 @@ async def train(
         "metrics": metrics,
         "cluster_conversion_rates": cluster_outcomes,
         "model_id": model_id,
+        "workspace_id": workspace_id,
         "model_file": str(artifact_path),
         "dataset_storage": {
             "raw_file": str(raw_path),
@@ -349,71 +618,53 @@ async def train(
 
 
 @app.post("/api/predict")
-async def predict(file: UploadFile = File(...), mapping: str | None = Form(None)):
+async def predict(
+    file: UploadFile = File(...),
+    mapping: str | None = Form(None),
+    workspace_id: str = Form("ws_automotive")
+):
     bundle = load_active_bundle()
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(400, "Please upload a CSV file.")
     df = read_csv_upload(await file.read())
     supplied = parse_mapping(mapping) if mapping else dict(bundle.get("mapping", {}))
-    X = normalize_features(df, supplied, require_all=False)
-    transformed = bundle["preprocessor"].transform(X)
-    cluster_ids = bundle["kmeans"].predict(transformed)
 
-    output = pd.DataFrame(index=df.index)
-    id_col = supplied.get("lead_id")
-    if not id_col or id_col not in df.columns:
-        samples = df.head(3).replace({np.nan: None}).to_dict(orient="records")
-        ai_res = auto_detect_mapping([str(c) for c in df.columns], samples)
-        id_col = ai_res.get("mapping", {}).get("lead_id")
-    output["lead_id"] = df[id_col].astype(str) if id_col and id_col in df.columns else [str(i + 1) for i in range(len(df))]
-    output["cluster"] = cluster_ids.astype(int) + 1
+    # Enrich leads retaining all original columns
+    enriched = enrich_lead_dataframe(df, bundle, supplied)
 
-    classifier = bundle.get("classifier")
-    if classifier is not None:
-        probabilities = classifier.predict_proba(X)[:, 1]
-        output["conversion_probability"] = np.round(probabilities, 4)
-        output["conversion_status"] = np.where(probabilities >= 0.70, "High potential",
-            np.where(probabilities >= 0.40, "Medium potential", "Low potential"))
-        output["priority"] = np.where(probabilities >= 0.70, "P1 - Contact first",
-            np.where(probabilities >= 0.40, "P2 - Follow up", "P3 - Nurture"))
-    else:
-        rates = bundle.get("cluster_outcomes", {})
-        if rates:
-            cluster_rates = np.array([rates.get(str(int(c)), np.nan) for c in cluster_ids])
-            output["cluster_historical_conversion_rate"] = np.round(cluster_rates, 4)
-            output["conversion_status"] = np.where(cluster_rates >= 0.70, "Historically high-converting segment",
-                np.where(cluster_rates >= 0.40, "Historically medium-converting segment", "Historically low-converting segment"))
-            output["priority"] = np.where(cluster_rates >= 0.70, "P1 - Contact first",
-                np.where(cluster_rates >= 0.40, "P2 - Follow up", "P3 - Nurture"))
-        else:
-            output["conversion_status"] = "Pattern group only - no outcome labels"
-            output["priority"] = "Review with sales team"
-    output = pd.concat([output, X.reset_index(drop=True)], axis=1)
     active_meta = {}
     if ACTIVE_MODEL_FILE.exists():
         try:
             active_meta = json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8"))
         except Exception:
-            active_meta = {}
-    model_id = active_meta.get("model_id", "legacy-model")
+            pass
+    model_id = active_meta.get("model_id", "active_model")
+    enriched["model_id"] = model_id
+
+    # Record into backward-compatible predictions table for test suite
     created_at = datetime.now(timezone.utc).isoformat()
     conn = db_connection()
     try:
-        for record in output.replace({np.nan: None}).to_dict(orient="records"):
+        for record in enriched["results"]:
             conn.execute(
                 "INSERT INTO predictions (model_id, lead_id, mode, prediction_json, created_at) VALUES (?, ?, ?, ?, ?)",
-                (model_id, str(record.get("lead_id", "")), "supervised" if classifier is not None else "unsupervised", json.dumps(record, default=str), created_at)
+                (model_id, str(record.get("lead_id", "")), enriched["mode"], json.dumps(record, default=str), created_at)
             )
         conn.commit()
     finally:
         conn.close()
-    return {
-        "rows": int(len(output)),
-        "mode": "supervised" if classifier is not None else "unsupervised",
-        "model_id": model_id,
-        "mapping_used": {f: supplied.get(f) for f in FEATURES if supplied.get(f)},
-        "results": output.replace({np.nan: None}).to_dict(orient="records"),
-    }
+
+    # Record in SQLite lead intelligence history
+    record_enriched_leads(
+        workspace_id=workspace_id,
+        user_email=None,
+        source_type="csv_upload",
+        source_name=file.filename,
+        model_id=model_id,
+        leads=enriched["results"]
+    )
+
+    return enriched
 
 
 @app.get("/api/model")
@@ -431,6 +682,7 @@ def model_info():
     return {
         "trained": True,
         "model_id": active.get("model_id", "legacy-model"),
+        "workspace_id": bundle.get("workspace_id", "ws_automotive"),
         "training_rows": bundle["training_rows"],
         "trained_at": bundle["trained_at"],
         "mapping": bundle["mapping"],
@@ -447,7 +699,7 @@ def list_datasets():
     for metadata_path in sorted(METADATA_DIR.glob("*.json"), reverse=True):
         try:
             item = json.loads(metadata_path.read_text(encoding="utf-8"))
-            items.append({k: item.get(k) for k in ("dataset_id", "model_id", "training_records", "raw_dataset", "processed_dataset", "processed_format", "trained_at")})
+            items.append({k: item.get(k) for k in ("dataset_id", "model_id", "workspace_id", "training_records", "raw_dataset", "processed_dataset", "processed_format", "trained_at")})
         except Exception:
             continue
     return {"count": len(items), "datasets": items}
